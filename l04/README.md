@@ -2,7 +2,7 @@ Lab 3
 =====
 
 Submit the solution to [Buffer](#buffer) tasks
-according to the [Submitting instructions](#submitting) before Tuesday Oct 24
+according to the [Submitting instructions](#submitting) before Tuesday Oct 31
 23:59:59.
 
 

@@ -10,6 +10,7 @@ Labs
 * [Lab 2](l02) (CopyCat)
 * [Lab 3](l03) (PipeWatch)
 * [Lab 4](l04) (Buffer)
+* [Lab 5](l05) (Echo)
 
 Assignments
 -----------

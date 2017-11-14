@@ -11,6 +11,7 @@ Labs
 * [Lab 3](l03) (PipeWatch)
 * [Lab 4](l04) (Buffer)
 * [Lab 5](l05) (Echo)
+* [Lab 6](l06) (RingBuffer, Writer)
 
 Assignments
 -----------

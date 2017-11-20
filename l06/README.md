@@ -17,12 +17,263 @@ Implement a [ring buffer](https://en.wikipedia.org/wiki/Circular_buffer)
 It should support all the operations defined in the
 [`RingBuffer.h`](RingBuffer.h) header.
 
+Note that methods of this class are not supposed to be thread safe.
+Instead users of this class (i.e. `Writer`) must ensure any required
+synchronization. This allows us to make better use of the RingBuffer's
+api, such as using the `front` and `remove` methods when we know that
+at most one "consumer" thread will be running.
+
 Writer
 ------
 
 Implement a "writer" that can be used to write all the data coming into a
 ring buffer into a file descriptor. See the requirements in the
 [`Writer.h`](Writer.h) header.
+
+Note: because we did not implement a copy / move assignment operator for
+`RingBuffer` (and also didn't define a default constructor), it must be
+initialized inside an initializer list:
+
+```c++
+Writer::Writer(int fd, size_t bufSize)
+	: fd(fd)
+	, rb(bufSize)
+{
+/*...*/
+}
+```
+
+### Synchronization
+
+To coordinate the `add` and `run` methods we will need two synchronization
+primitives: a mutex and a wait condition (`man pthread_mutex_destroy` and
+`man pthread_cond_destroy`).
+
+```c++
+class Writer {
+private:
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
+/*...*/
+};
+```
+
+Both need to be initialized (in the `Writer` constructor):
+
+```c++
+	pthread_mutex_init(&mutex, NULL);
+	pthread_cond_init(&cond, NULL);
+```
+
+Instead of the `NULL` parameter we can pass a pointer to a struct that can be
+used to customize the behaviour of the mutex / condition. If we are OK with the
+default behaviour (as in this case), we can also initialize the variables by
+assigning the special values `PTHREAD_MUTEX_INITIALIZER` and
+`PTHREAD_COND_INITIALIZER`, for example in an initializer of a C++ class:
+
+```c++
+Writer::Writer(int fd, size_t bufSize)
+	: fd(fd)
+	, rb(bufSize)
+	, mutex(PTHREAD_MUTEX_INITIALIZER)
+	, cond(PTHREAD_COND_INITIALIZER)
+{
+}
+```
+
+#### Locking/unlocking in C++
+
+Because calling `pthread_mutex_lock` and `pthread_mutex_unlock` can be "fragile"
+(and actually unusable if we use exceptions), we will first make a helper
+[RAI](http://en.cppreference.com/w/cpp/language/raii) class to manage the lock.
+It will lock the mutex in it's constructor and "automatically" unlock it in its
+destructor, i.e. when it goes out of scope:
+
+```c++
+class Locker {
+private:
+	pthread_mutex_t *mutex;
+public:
+	Locker(pthread_mutex_t *m)
+		: mutex(m)
+	{ pthread_mutex_lock(mutex); }
+	~Locker() { pthread_mutex_unlock(mutex); }
+};
+```
+
+### add
+
+The `add` method needs to lock the mutex, call add on the buffer and then
+use `pthread_cond_signal` to notify the `run` method that there is
+new data in the buffer (in case it was waiting because the buffer was empty).
+
+Note that we only really need to call `pthread_cond_signal` when the buffer was
+empty, but because its performance impact on linux should be pretty low when
+nobody is waiting on the condition, it is most probably OK to call it everytime
+(it can also actually help to recover from a deadlock if waiting on the
+condigion isn't implemented properly, see below).
+
+Also note that it doesn't matter  whether we signal the condition while holding
+the mutex or not, so the simplest implementation can look like this:
+
+```c++
+size_t Writer::add(const char *data, size_t size)
+{
+	Locker lock(&mutex);
+	auto added = b.add(data, size);
+	pthread_cond_signal(&cond);
+	return added;
+}
+```
+
+### run
+
+The run method needs, in a loop, to wait on the condition and write the data.
+
+The `pthread_cond_wait` method needs a condition but also a mutex. This is to
+avoid race conditions in a situation like this:
+
+```c++
+	if (b.isEmpty()) {
+		pthread_cond_wait(&cond)
+	}
+```
+
+After we checked if the buffer is empty, but before the wait call, another
+thread might have called the add method to add data, but the notification
+on the condition will thus be lost (we are not yet waiting for it). With our
+previous `add` implementation this would mean that we would be waiting until
+new data comes (and thus would be one data chunk "late"). However if we
+signalled the condition in `add` only when adding to an empty buffer, this would
+became a deadlock.
+
+With a lock, we can avoid the race:
+
+```c++
+	Locker lock(&mutex);
+	if (b.isEmpty()) {
+		pthread_cond_wait(&cond)
+	}
+```
+
+This is almost correct, except for another problem with wait conditions:
+due to the way they are implemented, `pthread_cond_wait` can finish even
+when it was not signalled. This is called a
+["spurious wakeup"](https://en.wikipedia.org/wiki/Spurious_wakeup)
+and can happen for example when the process is interrupted by a signal when
+waiting. The correct way is therefore to re-check the associated invariant
+and possibly call `pthread_cond_wait` again:
+
+```c++
+	Locker lock(&mutex);
+	while (b.isEmpty()) {
+		pthread_cond_wait(&cond)
+	}
+```
+
+*Note that in our use case this might not actually be a problem: we would most
+probably just `take` 0 bytes from the buffer and then attempt a `write` of 0
+bytes, which will just immediately return.*
+
+With this our `run` method could look something like this:
+
+```c++
+void Writer::run()
+{
+	char buf [1024];
+	while (1)  {
+		Locker lock(&mutex);
+		while (rb.isEmpty()) {
+			pthread_cond_wait(&cond, &mutex);
+		}
+
+		// TODO loop until we take everything from the ring buffer
+		// (or make buf larger then ring buffer)
+		size_t taken = rb.take(buf, sizeof(buf));
+
+		// TODO loop until all `taken` bytes are written
+		// and also check for errors!
+		ssize_t written = write(fd, buf, taken);
+	}
+}
+```
+
+There are two TODOs in this code. The first one is actually not that important:
+if we don't consume everything from the buffer, the next iteration of the
+outermost while loop will take care of that (although it will unlock and
+lock the mutex). The second TODO is more important: we would be dropping
+data if we didn't check if everything was written (and we obviously need to
+check for errors!).
+
+There is however a more serious problem with this solution: we are calling the
+`write` method while we are holding the lock. This means that while we would be
+blocked on the write call, all other threads will also be actually blocked if
+they called `add`. (Remember that this is why we are going to use threads for
+our TCP chat: so that other threads can continue reading and adding data even if
+some clients are slow and `writes` to them block).
+
+We just need to move the write out of the locked section:
+
+```c++
+	char buf [1024];
+	while (1)  {
+		{
+			Locker lock(&mutex);
+			while (rb.isEmpty()) {
+				pthread_cond_wait(&cond, &mutex);
+			}
+
+			size_t taken = rb.take(buf, sizeof(buf));
+		}
+
+		// TODO loop and check for errors
+		ssize_t written = write(fd, buf, taken);
+	}
+```
+
+After implementing the TODO, this would be a correct solution, although a bit
+inefficient, because we are moving the data around a lot.
+
+With the interface for ring buffer that we have, we can make it a bit more
+efficient: we can use the `front` method of the `RingBuffer` to get a pointer to
+the data (and also the size of data that is available). Because there will be
+only one thread running `run`, we can then call write on that data even without
+locking (`add`-ing will not overwrite our data, and nobody else will be removing
+the data). After `write` finishes, we can just `remove` the appropriate number
+of bytes from the `RingBuffer`:
+
+```c++
+void Writer::run()
+{
+	while (1)  {
+		RingBuffer::ArrayRef front{nullptr,0};
+		{
+			Locker lock(&mutex);
+			while (rb.isEmpty()) {
+				pthread_cond_wait(&cond, &mutex);
+			}
+			front = rb.front();
+		}
+		auto written = write(fd, front.data, front.size);
+		if (written == -1) { return; }
+		{
+			Locker lock(&mutex); // Q: do we need this? A: depends on the impl. of remove
+			rb.remove(written);
+		}
+	}
+}
+```
+
+Couple of notes on this solution:
+
+- We are locking the `remove` operation, because it might clash with `add`
+  operations from other threads. It is however possible to implement `remove` in
+  such a way, that it does not need to be blocked.
+
+- If the `RingBuffer` is "wrapped around", `front` will give us only part of the
+  data and we will write the second part in the next iteration of the `while`
+  cycle. The previous implementation issued only a single write at the cost of
+  copying the data into a second buffer (assuming the buffer was large enough).
 
 Submitting
 ----------

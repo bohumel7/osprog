@@ -3,7 +3,7 @@ Lab 6
 
 Submit the solution to both tasks according to the
 [Submitting instructions](#submitting) before Tuesday
-Nov 14 23:59:59.
+Nov 21 23:59:59.
 
 *These tasks are "preparation" for a threaded "TCP chat" server
 that we will implement in the next assignemt.*

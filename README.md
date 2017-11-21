@@ -12,6 +12,7 @@ Labs
 * [Lab 4](l04) (Buffer)
 * [Lab 5](l05) (Echo)
 * [Lab 6](l06) (RingBuffer, Writer)
+* [Lab 7](l07) (threaded TCP chat)
 
 Assignments
 -----------

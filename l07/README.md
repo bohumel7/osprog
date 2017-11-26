@@ -3,7 +3,7 @@ Lab 7
 
 Submit the solution to both tasks according to the
 [Submitting instructions](#submitting) before Tuesday
-Nov 28 23:59:59.
+**Dec 5** 23:59:59.
 
 *There are multiple bonuses listed at the end of this assignment. To receive the
 bonus points for them, mention which bonuses you solved and briefly describe how

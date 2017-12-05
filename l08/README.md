@@ -105,10 +105,11 @@ In this approach we spawn a new thread for each command, basically running
 `run_command` in it. Note that the original code however reuses (and modifies)
 the buffer containing the commmandline!
 
-Because the threads don't really interact with each other (except for passing
-the commandline when starting it), there's no need for any synchronization
-(unless you want to implement the job control from bonus). However you need to
-make sure that you correctly handle the strings.
+Because the `jobs` command has to keep track (a list?) of running processes and
+processes need to be removed from that list (from corresponding threads), you
+will most probably need to synchronize access to this list. Also remember that
+you need to clean up the threads (call `pthread_join` or `pthread_tryjoin_np`)
+eventually.
 
 #### Signals based implementation
 

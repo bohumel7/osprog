@@ -13,6 +13,7 @@ Labs
 * [Lab 5](l05) (Echo)
 * [Lab 6](l06) (RingBuffer, Writer)
 * [Lab 7](l07) (threaded TCP chat)
+* [Lab 8](l08) (synchronous shell)
 
 Assignments
 -----------

@@ -32,6 +32,11 @@ There is a 64 bit (`pnginfo`) and a 32 bit (`pnginfo32`) linux binary. Both are
 compiled with debug information to make debugging easier. MacOS user please
 compile your binary and submit it together with the solution ;).
 
+Wikipedia has some
+[basic information on buffer overflows](https://en.wikipedia.org/wiki/Buffer_overflow)
+and some nice writeups can be found here:
+https://sploitfun.wordpress.com/2015/06/26/linux-x86-exploit-development-tutorial-series/
+
 ### Analyzing the binary
 
 #### objdump
